@@ -6,7 +6,9 @@ import numpy as np
 import re
 import json
 import random
+import gcsfs
 
+import pandas as pd
 import tensorflow_transform as tft
 import apache_beam as beam
 import tensorflow as tf
@@ -19,7 +21,6 @@ from tensorflow_transform.tf_metadata import dataset_metadata, metadata_io,datas
 
 DELIMITERS_WORDS=' '
 SENTENCE_MAX_LENGTH=50
-
 TRAIN_DATA_SCHEMA = dataset_schema.from_feature_spec({
     "text":  tf.FixedLenFeature(shape=[], dtype=tf.string),
     "head":  tf.FixedLenFeature(shape=[], dtype=tf.string),
@@ -30,12 +31,21 @@ TRAIN_DATA_SCHEMA = dataset_schema.from_feature_spec({
     })
 train_metadata = dataset_metadata.DatasetMetadata(schema=TRAIN_DATA_SCHEMA)
 
+def read_label_mapping(filename=r'gs://relation_extraction/relations.csv',project="IotPubSub"):
+    connection = gcsfs.GCSFileSystem(project='IotPubSub')
+    with connection.open(filename) as f:
+        df = pd.read_csv(f)
+        output = {str(key):value for value,key in enumerate(list(df[df.columns[0]]))}
+    return output
+
+
+MAPPING = read_label_mapping()
 class PadList(list):
-    """ The super padding list used for padding data
-    """
+    """ The super padding list used for padding data"""
+
     def inner_pad(self, pad_length, pad_value=0):
         """Do inner padding of the list
-        
+
         Paramters:
             padd_length -- How long should the list be
             padd_value -- What value should be used for the padding
@@ -69,7 +79,6 @@ class PadList(list):
         return self
 
 
-
 def get_cloud_pipeline_options():
     """Get apache beam pipeline options to run with Dataflow on the cloud
     Args:
@@ -79,10 +88,10 @@ def get_cloud_pipeline_options():
     """
     options = {
         'runner': 'DataflowRunner',
-        'job_name': ('preprocessdigitaltwin-{}'.format(
+        'job_name': ('relation_extraction-{}'.format(
             datetime.now().strftime('%Y%m%d%H%M%S'))),
-        'staging_location': "gs://tommy_dummy_ml_engine/binaries/",
-        'temp_location':  "gs://tommy_dummy_ml_engine/tmp/",
+        'staging_location': "gs://relation_extraction/beam/binaries/",
+        'temp_location':  "gs://relation_extraction/beam/tmp/",
         'project': "iotpubsub-1536350750202",
         'region': 'europe-west1',
         'zone': 'europe-west1-b',
@@ -94,6 +103,7 @@ def get_cloud_pipeline_options():
 
 
 class SplitSentence(beam.DoFn):
+    """Legacy code that should be removed"""
     def process(self,element):
         sentence = element["sentence"].split()
         index_head = [sentence.index(word) for word in element["head"].split()]
@@ -110,18 +120,39 @@ class SplitSentence(beam.DoFn):
         }]
 
 
+class SplitSentence_Updated_Table(beam.DoFn):
+    def process(self,element):
+        sentence = element["sentence"].split()
+        index_head = [sentence.index(word) for word in element["head_word"].split()]
+        index_tail = [sentence.index(word) for word in element["tail_word"].split()]
+        distance_to_head = PadList(abs(index_head[0]-index)for index,word in enumerate(sentence)).inner_pad(50,-1)
+        distance_to_tail = PadList(abs(index_tail[0]-index)for index,word in enumerate(sentence)).inner_pad(50,-1)
+        relation = element["relation"] if element["relation"] != "NA" else 'nan'
+        return [{
+            "text":element["sentence"].lower(),
+            "head":element["head_word"],
+            "taill":element["tail_word"],
+            "distance_to_head":distance_to_head,
+            "distance_to_tail":distance_to_tail,
+            "sentence_length":len(sentence),
+            "relation": MAPPING[relation]
+        }]
+
+
 class ReadBigQuery(beam.PTransform):
     """Read from BigQuery and do split to list"""
     def expand(self,pcoll):
         table_spec = bigquery.TableReference(
-        projectId='iotpubsub-1536350750202',
-        datasetId='baybenames',
-        tableId='relation_extraction_data')
+            projectId='iotpubsub-1536350750202',
+            datasetId='baybenames',
+            #tableId='relation_extraction_data'
+            tableId='relation_data_sample'
+            )
         return  (
             pcoll
             |'Read in put table' >> beam.io.Read(beam.io.BigQuerySource(table_spec))
-            |'Split words' >> beam.ParDo(SplitSentence())
-            |'Split test and training data' >>  beam.Partition(lambda element, _: 0 if randint(0,100)<80 else 0,2 )
+            |'Split words' >> beam.ParDo(SplitSentence_Updated_Table())
+            |'Split test and training data' >>  beam.Partition(lambda element, _: 0 if randint(0,100)<80 else 1,2 )
             )
 
 
@@ -145,9 +176,11 @@ def main(argv=None):
         pipeline_options = get_cloud_pipeline_options()
     else:
         pipeline_options = beam.pipeline.PipelineOptions(flags=[],**{'project': "iotpubsub-1536350750202"})
-    with beam_impl.Context(temp_dir="gs://named_entity_recognition/beam/"):
+    with beam_impl.Context(temp_dir="gs://relation_extraction/beam"):
         p = beam.Pipeline(options=pipeline_options)
         train_data, test_data = (p | "Read from bigquery" >> ReadBigQuery())
+
+        (test_data | "test it" >> beam.Map(printy))
         train_data = (train_data, train_metadata)
         train_dataset, transform_fn = (train_data
                                             | 'AnalyzeAndTransform' >> beam_impl.AnalyzeAndTransformDataset(preprocessing_fn)
@@ -158,11 +191,11 @@ def main(argv=None):
         transformed_data_coder = tft.coders.ExampleProtoCoder(transformed_metadata.schema)
         _ = (train_data
                 | 'Encode train data to save it' >> beam.Map(transformed_data_coder.encode)
-                | 'Write the train data to tfrecords' >> tfrecordio.WriteToTFRecord(os.path.join("gs://relation_extraction/beam/","TRAIN"))
+                | 'Write the train data to tfrecords' >> tfrecordio.WriteToTFRecord(os.path.join("gs://relation_extraction/beam/Train","TRAIN"))
                 )
         _ = (test_data
                 | 'Encode test data to save it' >> beam.Map(transformed_data_coder.encode)
-                | 'Write the test data to tfrecords' >> tfrecordio.WriteToTFRecord(os.path.join("gs://relation_extraction/beam/","TEST"))
+                | 'Write the test data to tfrecords' >> tfrecordio.WriteToTFRecord(os.path.join("gs://relation_extraction/beam/Test","TEST"))
                 )
         _ = (transform_fn | "WriteTransformFn" >> transform_fn_io.WriteTransformFn("gs://relation_extraction/beam/"))
 
