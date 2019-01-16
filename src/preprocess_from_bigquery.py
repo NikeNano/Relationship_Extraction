@@ -7,6 +7,7 @@ import re
 import json
 import random
 import gcsfs
+import logging
 
 import pandas as pd
 import tensorflow_transform as tft
@@ -14,6 +15,7 @@ import apache_beam as beam
 import tensorflow as tf
 from random import randint
 from apache_beam.io import tfrecordio
+from apache_beam.metrics import Metrics
 from apache_beam.io.gcp.internal.clients import bigquery
 from tensorflow_transform.beam import impl as beam_impl
 from tensorflow_transform.beam.tft_beam_io import transform_fn_io
@@ -88,7 +90,7 @@ def get_cloud_pipeline_options():
     """
     options = {
         'runner': 'DataflowRunner',
-        'job_name': ('relation_extraction-{}'.format(
+        'job_name': ('relation-extraction-{}'.format(
             datetime.now().strftime('%Y%m%d%H%M%S'))),
         'staging_location': "gs://relation_extraction/beam/binaries/",
         'temp_location':  "gs://relation_extraction/beam/tmp/",
@@ -121,22 +123,50 @@ class SplitSentence(beam.DoFn):
 
 
 class SplitSentence_Updated_Table(beam.DoFn):
-    def process(self,element):
+
+    def __init__(self):
+        self.text_len_dist = Metrics.distribution(self.__class__,
+                                                  'text_len_dist')
+        self.unmatched_element = Metrics.counter(self.__class__,
+                                               'unmatched_words')
+
+    def process(self,element,max_sentence_length=None):
+        logging.info("Outside")
+        logging.info(element)
+        logging.info(element.keys())
         sentence = element["sentence"].split()
-        index_head = [sentence.index(word) for word in element["head_word"].split()]
-        index_tail = [sentence.index(word) for word in element["tail_word"].split()]
-        distance_to_head = PadList(abs(index_head[0]-index)for index,word in enumerate(sentence)).inner_pad(50,-1)
-        distance_to_tail = PadList(abs(index_tail[0]-index)for index,word in enumerate(sentence)).inner_pad(50,-1)
-        relation = element["relation"] if element["relation"] != "NA" else 'nan'
-        return [{
-            "text":element["sentence"].lower(),
-            "head":element["head_word"],
-            "taill":element["tail_word"],
-            "distance_to_head":distance_to_head,
-            "distance_to_tail":distance_to_tail,
-            "sentence_length":len(sentence),
-            "relation": MAPPING[relation]
-        }]
+        sentene_len=len(sentence)
+        self.text_len_dist.update(sentene_len)
+        if sentene_len <= max_sentence_length:
+            # This way we filter first!
+            # Saves money and time ;) 
+            if len(element.keys())==4:
+                logging.info("Nestled dict as input")
+                index_head = [sentence.index(word) for word in element["head"]["word"].split()]
+                index_tail = [sentence.index(word) for word in element["head"]["word"].split()]
+                head = element["head"]["word"]
+                tail = element["head"]["word"]
+            else: 
+                logging.info("Flatten dict as inpu")
+                index_head = [sentence.index(word) for word in element["head_word"].split()]
+                index_tail = [sentence.index(word) for word in element["tail_word"].split()]
+                head = element["head_word"]
+                tail = element["tail_word"]
+            distance_to_head = PadList(abs(index_head[0]-index)for index,word in enumerate(sentence)).inner_pad(50,DEFAULT_WORD_VALUE)
+            distance_to_tail = PadList(abs(index_tail[0]-index)for index,word in enumerate(sentence)).inner_pad(50,DEFAULT_WORD_VALUE)
+            relation = element["relation"] if element["relation"] != "NA" else 'nan'
+            return [{
+                "text" : element["sentence"].lower(),
+                "head" : head,
+                "taill" : tail,
+                "distance_to_head" : distance_to_head,
+                "distance_to_tail" : distance_to_tail,
+                "sentence_length" : len(sentence),
+                "relation" : MAPPING[relation]
+            }]
+        else:
+            logging.info("The sentence is longer than expected,want be used")
+            self.unmatched_element.inc()
 
 
 class ReadBigQuery(beam.PTransform):

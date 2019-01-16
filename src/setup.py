@@ -8,7 +8,7 @@ setup(
     author='nikeNano',
     author_email='',
     install_requires=['tensorflow==1.11.0',
-                      'tensorflow-transform==0.11.0'],
+                      'tensorflow-transform==0.11.0','gcsfs'],
     packages=find_packages(exclude=['data']),
     description='GCP ml engine/dataflow/pubsub/bigquery demp',
     url=''
