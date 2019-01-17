@@ -23,13 +23,15 @@ from tensorflow_transform.tf_metadata import dataset_metadata, metadata_io,datas
 
 DELIMITERS_WORDS=' '
 SENTENCE_MAX_LENGTH=50
+DEFAULT_WORD_VALUE=0
 TRAIN_DATA_SCHEMA = dataset_schema.from_feature_spec({
     "text":  tf.FixedLenFeature(shape=[], dtype=tf.string),
     "head":  tf.FixedLenFeature(shape=[], dtype=tf.string),
     "taill": tf.FixedLenFeature(shape=[], dtype=tf.string),
     "distance_to_head": tf.FixedLenFeature(shape=[SENTENCE_MAX_LENGTH], dtype=tf.int64),
     "distance_to_tail": tf.FixedLenFeature(shape=[SENTENCE_MAX_LENGTH], dtype=tf.int64),
-    "sentence_length": tf.FixedLenFeature(shape=[],dtype=tf.int64)
+    "sentence_length": tf.FixedLenFeature(shape=[],dtype=tf.int64),
+    "relation" : tf.FixedLenFeature(shape=[], dtype=tf.int64),
     })
 train_metadata = dataset_metadata.DatasetMetadata(schema=TRAIN_DATA_SCHEMA)
 
@@ -110,8 +112,8 @@ class SplitSentence(beam.DoFn):
         sentence = element["sentence"].split()
         index_head = [sentence.index(word) for word in element["head"].split()]
         index_tail = [sentence.index(word) for word in element["tail"].split()]
-        distance_to_head = PadList(abs(index_head[0]-index)for index,word in enumerate(sentence)).inner_pad(50,-1)
-        distance_to_tail = PadList(abs(index_tail[0]-index)for index,word in enumerate(sentence)).inner_pad(50,-1)
+        distance_to_head = PadList(abs(index_head[0]-index)for index,word in enumerate(sentence)).inner_pad(50,DEFAULT_WORD_VALUE)
+        distance_to_tail = PadList(abs(index_tail[0]-index)for index,word in enumerate(sentence)).inner_pad(50,DEFAULT_WORD_VALUE)
         return [{
             "text":element["sentence"].lower(),
             "head":element["head"],
@@ -130,14 +132,14 @@ class SplitSentence_Updated_Table(beam.DoFn):
         self.unmatched_element = Metrics.counter(self.__class__,
                                                'unmatched_words')
 
-    def process(self,element,max_sentence_length=None):
+    def process(self,element):
         logging.info("Outside")
         logging.info(element)
         logging.info(element.keys())
         sentence = element["sentence"].split()
         sentene_len=len(sentence)
         self.text_len_dist.update(sentene_len)
-        if sentene_len <= max_sentence_length:
+        if sentene_len <= SENTENCE_MAX_LENGTH:
             # This way we filter first!
             # Saves money and time ;) 
             if len(element.keys())==4:
@@ -155,6 +157,7 @@ class SplitSentence_Updated_Table(beam.DoFn):
             distance_to_head = PadList(abs(index_head[0]-index)for index,word in enumerate(sentence)).inner_pad(50,DEFAULT_WORD_VALUE)
             distance_to_tail = PadList(abs(index_tail[0]-index)for index,word in enumerate(sentence)).inner_pad(50,DEFAULT_WORD_VALUE)
             relation = element["relation"] if element["relation"] != "NA" else 'nan'
+            print("inne")
             return [{
                 "text" : element["sentence"].lower(),
                 "head" : head,
