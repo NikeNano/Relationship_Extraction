@@ -2,7 +2,7 @@ import argparse
 import tensorflow as tf
 import tensorflow_transform as tft
 from tensorflow.contrib.training.python.training import hparam
-from trainer.model import cnn_model,train_input_fn,eval_input_fn #,build_serving_input_fn
+from trainer.model import cnn_model,train_input_fn,eval_input_fn,serve_input_fn
 
 
 def model_setup(params=None):
@@ -30,17 +30,17 @@ def train_setup(hparams = None,classifier=None):
 
 
 def eval_setup(hparams = None):
-	#tf_transform_beam = tft.TFTransformOutput(hparams.model_dir_beam)
-	#serving_input_fn = build_serving_input_fn(tf_transform_beam = tf_transform_beam,params = hparams)
-	#exporter = tf.estimator.LatestExporter('exporter', serving_input_fn)
+	tf_transform_beam = tft.TFTransformOutput(hparams.model_dir_beam)
+	serving_input_fn = serve_input_fn(tf_transform_beam = tf_transform_beam)
+	exporter = tf.estimator.LatestExporter('exporter', serving_input_fn)
 	eval_spec = tf.estimator.EvalSpec(input_fn = lambda:eval_input_fn(
 			test_folder = hparams.eval_folder,
 			model_dir_beam = hparams.model_dir_beam,
 			batch_size = int(hparams.batch_size)
 			),
 		start_delay_secs = 10, 
-		throttle_secs = 20,
-		#exporters = exporter
+		throttle_secs = 30,
+		exporters = exporter
 		)
 	return eval_spec
 
@@ -78,7 +78,7 @@ if __name__=="__main__":
     parser.add_argument(
         '--batch-size',
         help = 'the batch size',
-        default = 20)
+        default = 1000)
     parser.add_argument(
         '--max-sentence-length',
         help='the max length of a sentence',

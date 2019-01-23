@@ -56,8 +56,32 @@ def eval_input_fn(test_folder=None,model_dir_beam=None,batch_size=None):
     return transformed_features, transformed_labels
 
 
-def serve_input_fn():
-    pass
+def serve_input_fn(tf_transform_beam=None):
+    SENTENCE_MAX_LENGTH=50
+    raw_feature_spec = dataset_schema.from_feature_spec({
+    "text":  tf.FixedLenFeature(shape=[], dtype=tf.string),
+    "head":  tf.FixedLenFeature(shape=[], dtype=tf.string),
+    "taill": tf.FixedLenFeature(shape=[], dtype=tf.string),
+    "distance_to_head": tf.FixedLenFeature(shape=[SENTENCE_MAX_LENGTH], dtype=tf.int64),
+    "distance_to_tail": tf.FixedLenFeature(shape=[SENTENCE_MAX_LENGTH], dtype=tf.int64),
+    "sentence_length": tf.FixedLenFeature(shape=[],dtype=tf.int64),
+    "relation" : tf.FixedLenFeature(shape=[], dtype=tf.int64),
+    })
+
+
+    def build_serving_input_fn(tf_transform_beam=None):
+        """
+        Receiver function that converts raw features into transformed features
+        :return: ServingInputReceiver
+        """
+        raw_input_fn = tf.estimator.export.build_parsing_serving_input_receiver_fn(
+            raw_feature_spec)
+        raw_features, _, _ = raw_input_fn()
+        transformed_features = tf_transform_beam.transform_raw_features(
+            raw_features)
+        return tf.estimator.export.ServingInputReceiver(
+            transformed_features, raw_features)
+    return build_serving_input_fn(tf_transform_beam)
 
 
 def padd(input_tensor=None,tensor_length=None):
@@ -110,6 +134,10 @@ def cnn_model(features,labels,mode,params):
       activation=tf.nn.relu,)
     pool3 = tf.layers.max_pooling2d(inputs=conv3, pool_size=[MAX_SENTENCE_LENGTH-conv3_filter+1, 1], strides=1)
     concat = tf.reshape(tf.concat([pool1,pool2,pool3],1),[-1,6])
+    # add dense layer and also add a dropout layer, do we overfit at all in the model?
+    # Train to overfitt and view the results
+    # Lets make sure that it over fits now :) Have enough data I hope at least :) 
+
     head = tf.contrib.estimator.multi_class_head(
         n_classes = N_CLASSES
         )
