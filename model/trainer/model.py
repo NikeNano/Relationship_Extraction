@@ -59,15 +59,14 @@ def eval_input_fn(test_folder=None,model_dir_beam=None,batch_size=None):
 def serve_input_fn(tf_transform_beam=None):
     SENTENCE_MAX_LENGTH=50
     raw_feature_spec = dataset_schema.from_feature_spec({
-    "text":  tf.FixedLenFeature(shape=[], dtype=tf.string),
-    "head":  tf.FixedLenFeature(shape=[], dtype=tf.string),
-    "taill": tf.FixedLenFeature(shape=[], dtype=tf.string),
-    "distance_to_head": tf.FixedLenFeature(shape=[SENTENCE_MAX_LENGTH], dtype=tf.int64),
-    "distance_to_tail": tf.FixedLenFeature(shape=[SENTENCE_MAX_LENGTH], dtype=tf.int64),
-    "sentence_length": tf.FixedLenFeature(shape=[],dtype=tf.int64),
-    "relation" : tf.FixedLenFeature(shape=[], dtype=tf.int64),
-    })
-
+        "text":  tf.FixedLenFeature(shape=[], dtype=tf.string),
+        "head":  tf.FixedLenFeature(shape=[], dtype=tf.string),
+        "taill": tf.FixedLenFeature(shape=[], dtype=tf.string),
+        "distance_to_head": tf.FixedLenFeature(shape=[SENTENCE_MAX_LENGTH], dtype=tf.int64),
+        "distance_to_tail": tf.FixedLenFeature(shape=[SENTENCE_MAX_LENGTH], dtype=tf.int64),
+        "sentence_length": tf.FixedLenFeature(shape=[],dtype=tf.int64),
+        "relation" : tf.FixedLenFeature(shape=[], dtype=tf.int64),
+        })
 
     def build_serving_input_fn(tf_transform_beam=None):
         """
@@ -75,7 +74,7 @@ def serve_input_fn(tf_transform_beam=None):
         :return: ServingInputReceiver
         """
         raw_input_fn = tf.estimator.export.build_parsing_serving_input_receiver_fn(
-            raw_feature_spec)
+            raw_feature_spec.as_feature_spec())
         raw_features, _, _ = raw_input_fn()
         transformed_features = tf_transform_beam.transform_raw_features(
             raw_features)
